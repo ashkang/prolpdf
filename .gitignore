@@ -1,0 +1,8 @@
+*.htm
+.*.htm
+*.html
+*.pdf
+.toc.html
+.tmp
+.log
+
