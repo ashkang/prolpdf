@@ -35,9 +35,9 @@ toc_file=".toc.html"
 c_files=()
 c_titles=()
 link_rel=`echo $1 | sed -e 's/index.htm//g'`
-rm index.htm
+rm index.htm >/dev/null 2>&1
 get "$1"
-# tidy -config tidy.config -m index.htm >/dev/null 2>&1
+tidy -config tidy.config -m index.htm >/dev/null 2>&1
 
 meta=`cat index.htm | tr -d '\n' | grep -o "<meta[^>]*>"`
 title=`cat index.htm | grep -o "<title>.*</title>"`
@@ -51,27 +51,31 @@ echo "$link" >> $toc_file
 echo "</head>" >> $toc_file
 echo "$body_line" >> $toc_file
 
-xml sel --html -N x="http://www.w3.org/1999/xhtml" -t -m "//x:big/x:a/text()" -c . -n1 index.htm > .tmp
+xml sel --html -N x="http://www.w3.org/1999/xhtml" -t -m "//x:big/x:a/text()" -c . -n1 index.htm | xml esc > .tmp
 while read line; do
-    c_titles+=("$line")
+    c_titles+=( "$line" )
 done < .tmp
 
-xml sel -N x="http://www.w3.org/1999/xhtml" -t -m "//x:big/x:a" -c . -n1 index.htm > .tmp
+xml sel --html -N x="http://www.w3.org/1999/xhtml" -t -m "//x:big/x:a" -v "@href" -n1 index.htm > .tmp
 while read line; do
-    file=`echo $line | sed -e 's/^.*href=\"\(.*\)\".*$/\1/g'`
-    c_files+=("$file")
+    c_files+=( "$line" )
 done < .tmp
 
 count_ref=0
 map=0;
 
 for i in ${c_files[@]}; do
-    rm $i
+    rm $i >/dev/null 2>/dev/null
     get "${link_rel}/$i"
     echo "processing $i with cr = $count_ref, c = $count"
-    # tidy -config tidy.config -m $i >/dev/null 2>&1
-    xml ed -N x="http://www.w3.org/1999/xhtml" -d "//x:h1" -d "//x:h2" -d "//x:h3" $i > .tmp
-    xml ed -N x="http://www.w3.org/1999/xhtml" -r "//x:h4" -v "strong" .tmp > .$i
+    tidy -config tidy.config -m $i >/dev/null 2>&1
+    xml ed -N x="http://www.w3.org/1999/xhtml" \
+        -d "//x:h1" -d "//x:h2" -d "//x:h3" -d "//x:h5" \
+        -d "//x:p[@class='toplink']" -d "//x:p[@class='updat']" \
+        -d "//x:p[@class='link']" \
+        $i > .tmp 2>&1
+    xml ed -N x="http://www.w3.org/1999/xhtml" -r "//x:h4" -v "strong" .tmp > .$i 2>&1
+
     for j in `cat $i | tr -d '\n' | grep -o "<a href=\"#s[0-9]*\">[^>]*>" | sed 's/\(<a href=\"#s\)\([0-9].*\)\(\">[^>]*>\)/\2/g'`; do
         let m=$j+$count_ref;
         sed -i s/href=\"#s$j\"/href=\"#s$m\"/g .$i;
@@ -81,8 +85,8 @@ for i in ${c_files[@]}; do
     count=`cat $i | tr -d '\n' | grep -o "<a href=\"#s[0-9]*\">[^>]*>" | wc -l`
     let count_ref=${count_ref}+${count}
     echo "<h1>${c_titles[$map]}</h1>" >> $toc_file
-    cat .$i | tr -d '\n' | grep -o "<body.*<\/body>" | sed -e 's/<body[^>]*>//g' | sed -e 's/<\/body>//g' \
-        | sed 's/<h2>.*<\/h2>//g' | sed 's/<h1>.*<\/h1>//g' >> $toc_file
+    # xml sel --html -N x="http://www.w3.org/1999/xhtml" -t -m "//x:body/*" -c . .$i | xml esc >> $toc_file
+    cat .$i | tr -d '\n' | grep -o "<body.*</body>" | sed -e 's/<body[^>]*>//g' | sed -e 's/<\/body>//g' >> $toc_file
     let map=$map+1
 done
 echo "</body>" >> $toc_file
