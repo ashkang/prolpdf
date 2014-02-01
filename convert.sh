@@ -1,6 +1,8 @@
 #!/bin/bash
 
-trap "exit 1" TERM
+trap "clean_up && exit 1" TERM
+trap "clean_up && exit 1" INT
+
 export __me=$$
 
 RED="\033[1;31m"
@@ -13,7 +15,7 @@ function clean_up
 {
     rm *.htm* >/dev/null 2>&1
     rm .*.htm* >/dev/null 2>&1
-    rm .out_file >/dev/null 2>&1
+    rm .${out_file} >/dev/null 2>&1
     rm .tmp >/dev/null 2>&1
 
     return 0
@@ -30,7 +32,7 @@ function die
     echo -e "${RED}error:${RESET} $1"
     kill -s TERM $__me
 
-    return 0
+    return 1
 }
 
 function warn
@@ -48,7 +50,7 @@ function get
 
 function single_page_render
 {
-    echo -e "${YELLOW}single page document${RESET}"
+    echo -e "${YELLOW}single-page document${RESET}"
     ${xml} ed -N x="http://www.w3.org/1999/xhtml" \
         -d "//x:h1" -d "//x:h2" -d "//x:h3" -d "//x:h5" \
         -d "//x:p[@class='toplink']" -d "//x:p[@class='updat']" \
@@ -56,9 +58,16 @@ function single_page_render
         -d "//x:p[@class='link']" \
         "${fname}.${fext}" >.tmp 2>/dev/null \
         || die "invalid single page document format"
-    ${xml} ed -N x="http://www.w3.org/1999/xhtml" -r "//x:h4" -v "h1" \
-        .tmp > $out_file 2>/dev/null \
-        || die "invalis single page document format"
+    ${xml} sel ---html N x="http://www.w3.org/1999/xhtml" -t -m "x:h4" -c . \
+        -n1 ${fname}.${ext} >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        ${xml} ed --html -N x="http://www.w3.org/1999/xhtml" -r "//x:h4" -v "h1" \
+            .tmp > $out_file 2>/dev/null \
+            || die "invalid single-page document format"
+    else
+        cp .tmp $out_file >/dev/null 2>&1
+        declare -g webpage_mode="--webpage"
+    fi
 
     return 0
 }
@@ -82,7 +91,7 @@ function multi_page_render
             || die "unable to fetch ${CYAN}$i${RESET}"
         echo -ne "processing ${YELLOW}$i${RESET}... "
         ${tidy} -config tidy.config -m $i >/dev/null 2>&1 \
-            || die "applying tidy changes to ${CYAN}$i${RESET}"
+            || warn "${CYAN}applying tidy changes to ${YELLOW}$i${RESET}"
         ${xml} ed -N x="http://www.w3.org/1999/xhtml" \
             -d "//x:h1" -d "//x:h2" -d "//x:h3" -d "//x:h5" \
             -d "//x:p[@class='toplink']" -d "//x:p[@class='updat']" \
@@ -141,7 +150,7 @@ echo -e "fext: ${YELLOW}${fext}${RESET}"
 rm ${fname}.{$fext} >/dev/null 2>&1
 get "$1" || die "unable to fetch index file"
 ${tidy} -config tidy.config -m ${fname}.${fext} >/dev/null 2>&1 \
-    || warn "applying tidy changes to index file"
+    || warn "${CYAN}applying tidy changes to index file${RESET}"
 
 out_name=$(${xml} sel --html -N x="http://www.w3.org/1999/xhtml" -t -m "//x:head/x:title/text()" -c . \
     -n1 ${fname}.${fext} 2>/dev/null| sed -e 's/[\ -]/_/g' | sed -e 's/[\:\?()]*//g') \
@@ -174,6 +183,17 @@ else
     fi
 fi
 
-${htmldoc} "${out_file}" -f "${out_name}.pdf" \
-    || die "unable to generate output pdf document"
+echo -ne "generating output pdf document... "
+err=$( { ${htmldoc} ${webpage_mode}"${out_file}" -f "${out_name}.pdf"; } 2>&1 )
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}done${RESET}"
+    echo $err
+    exit 0
+else
+    echo -e "${RED}failed${RESET}"
+    echo $err
+    exit 1
+fi
+
 clean_up
