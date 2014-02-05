@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 trap "clean_up && exit 1" TERM
 trap "clean_up && exit 1" INT
@@ -45,8 +45,18 @@ function warn
 function get
 {
     echo -ne "fetching ${YELLOW}$1${RESET}... "
-    err=$( { ${get_prefix} wget "$1" >/dev/null 2>&1; } 2>&1 )
+    err=$( { wget "$1" >/dev/null 2>&1; } 2>&1 )
     op=$?
+
+    if [ $op -ne 0 ]; then
+        err=$( { ${get_prefix_1} wget "$1" >/dev/null 2>&1; } 2>&1 )
+        op=$?
+    fi
+
+    if [ $op -ne 0 ]; then
+        err=$( { ${get_prefix_2} wget "$1" >/dev/null 2>&1; } 2>&1 )
+        op=$?
+    fi
 
     if [ $op -eq 0 ]; then
         echo -e "${GREEN}done${RESET}"
@@ -149,11 +159,17 @@ function multi_page_render
     return 0
 }
 
-xml=`which xml` || die "unable to find xmlstarlet"
+if [ $# -lt 1 ]; then
+    die "usage: ./convert.sh http://marxists.org/PATH_TO_YOUR_ARTICLE.html"
+fi
+
+xml=`which xml` || xml=`which xmlstarlet` || die "unable to find xmlstarlet"
 htmldoc=`which htmldoc` || die "unable to find htmldoc"
 tidy=`which tidy` || die "unable to find tidy"
 
-get_prefix="proxychains -q"
+get_prefix_1="proxychains -q"
+get_prefix_2="tsocks"
+
 out_file=".compiled.html"
 
 c_files=()
@@ -167,9 +183,9 @@ fname=$(echo $1 | grep -o '/[^\/]*\.html*' | \
     tr -d '/' | sed -e s/\.${fext}//g) \
     || die "unable to get file name"
 
-echo -e "link_rel: ${YELLOW}${link_rel}${RESET}"
-echo -e "fname: ${YELLOW}${fname}${RESET}"
-echo -e "fext: ${YELLOW}${fext}${RESET}"
+echo -e "document base address: ${YELLOW}${link_rel}${RESET}"
+echo -e "file name (without extension): ${YELLOW}${fname}${RESET}"
+echo -e "file extension: ${YELLOW}${fext}${RESET}"
 
 rm ${fname}.{$fext} >/dev/null 2>&1
 get "$1" || die "unable to fetch index file"
@@ -181,7 +197,7 @@ out_name=$(${xml} sel --html -N x="http://www.w3.org/1999/xhtml" \
     -n1 ${fname}.${fext} 2>/dev/null| sed -e 's/[\ -]/_/g' \
     | sed -e 's/[\:\?()]*//g') \
     || die "unable to generate output file name"
-echo -e "out_name: ${YELLOW}${out_name}${RESET}"
+echo -e "output file name: ${YELLOW}${out_name}${RESET}"
 ${xml} sel --html -N x="http://www.w3.org/1999/xhtml" -t -m "//x:big" -c . \
     -n1 ${fname}.${fext} >/dev/null 2>&1
 
@@ -211,7 +227,7 @@ else
     fi
 fi
 
-echo -e "webpage_mode: ${YELLOW}$webpage_mode${RESET}"
+echo -e "webpage mode: ${YELLOW}$webpage_mode${RESET}"
 echo -ne "generating output pdf document... "
 err=$( { ${htmldoc} ${webpage_mode} "${out_file}" -f "${out_name}.pdf"; } 2>&1 )
 
