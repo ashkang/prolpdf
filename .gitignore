@@ -3,6 +3,5 @@
 *.html
 *.pdf
 .toc.html
-.tmp
-.log
-
+*.tmp
+*.log

@@ -42,19 +42,38 @@ function warn
     return 0
 }
 
+function logger
+{
+    unset arr
+    arr=()
+    for((i=1;i<=$#;i++))
+    do
+        arr+=( "${!i}" )
+    done
+
+    stamp=`date +"%Y %b %d %H:%M:%S"`
+
+    # echo $stamp
+
+    echo -e "$stamp:" >>$log_source
+    "${arr[0]}" "${arr[@]:1}" >>$log_source 2>>$log_source
+
+    return $?
+}
+
 function get
 {
     echo -ne "fetching ${YELLOW}$1${RESET}... "
-    err=$( { wget "$1" >/dev/null 2>&1; } 2>&1 )
+    logger wget "$1"
     op=$?
 
     if [ $op -ne 0 ]; then
-        err=$( { ${get_prefix_1} wget "$1" >/dev/null 2>&1; } 2>&1 )
+        logger ${get_prefix_1} wget "$1"
         op=$?
     fi
 
     if [ $op -ne 0 ]; then
-        err=$( { ${get_prefix_2} wget "$1" >/dev/null 2>&1; } 2>&1 )
+        logger ${get_prefix_2} wget "$1"
         op=$?
     fi
 
@@ -81,17 +100,17 @@ function single_page_render
         -d "//x:hr[@class='infobot']" \
         -d "//x:p[@class='link']" \
         -d "//x:table[@class='t2h-foot']" \
-        "${fname}.${fext}" >.tmp 2>/dev/null \
+        "${fname}.${fext}" >.tmp 2>${log_source} \
         || die "invalid single page document format"
     ${xml} sel ---html N x="http://www.w3.org/1999/xhtml" -t -m "x:h4" -c . \
-        -n1 ${fname}.${ext} >/dev/null 2>&1
+        -n1 ${fname}.${ext} >${log_source} 2>&1
     if [ $? -eq 0 ]; then
         ${xml} ed --html -N x="http://www.w3.org/1999/xhtml" \
             -r "//x:h4" -v "h1" \
-            .tmp > $out_file 2>/dev/null \
-            || die "invalid single-page document format"
+            .tmp > $out_file 2>${log_source} \
+            || die "unable to replace h4 heading tags with h1"
     else
-        cp .tmp $out_file >/dev/null 2>&1
+        cp .tmp $out_file >${log_source} 2>&1
         declare -g webpage_mode="--webpage"
     fi
 
@@ -105,7 +124,7 @@ function multi_page_render
         || "unable to get body tag from multi-page document"
     ${xml} sel --html -N x="http://www.w3.org/1999/xhtml" \
         -t -m "//x:head" -c . \
-        -n1 ${fname}.${fext} >${out_file} 2>/dev/null \
+        -n1 ${fname}.${fext} >${out_file} 2>${log_source} \
         || die "unable to get head tag from multi-page document"
     echo "$body_line" >> ${out_file}
 
@@ -113,11 +132,11 @@ function multi_page_render
     map=0;
 
     for i in ${c_files[@]}; do
-        rm $i >/dev/null 2>/dev/null
+        rm $i >${log_source} 2>&1
         get "${link_rel}/$i" \
             || die "unable to fetch ${CYAN}$i${RESET}"
         echo -ne "processing ${YELLOW}$i${RESET}... "
-        ${tidy} -config tidy.config -m $i >/dev/null 2>&1 \
+        ${tidy} -config tidy.config -m $i >${log_source} 2>&1 \
             || warn "${CYAN}applying tidy changes to ${YELLOW}$i${RESET}"
         ${xml} ed -N x="http://www.w3.org/1999/xhtml" \
             -d "//x:h1" -d "//x:h2" -d "//x:h3" -d "//x:h5" \
@@ -130,10 +149,10 @@ function multi_page_render
             -d "//x:p[@class='information']" \
             -d "//x:p[@class='link']" \
             -d "//x:table[@class='t2h-foot']" \
-            $i >.tmp 2>/dev/null \
+            $i >.tmp 2>${log_source} \
             || die "unable to remove additional tags from multi-page document"
         ${xml} ed -N x="http://www.w3.org/1999/xhtml" -r "//x:h4" -v "strong" \
-            .tmp >.$i 2>/dev/null \
+            .tmp >.$i 2>${log_source} \
             || die "invalid multi-page document"
 
         for j in \
@@ -169,11 +188,13 @@ tidy=`which tidy` || die "unable to find tidy"
 
 get_prefix_1="proxychains -q"
 get_prefix_2="tsocks"
-
+log_source="prolpdf.log"
 out_file=".compiled.html"
 
 c_files=()
 c_titles=()
+
+echo -ne "" > ${log_source}
 
 link_rel=$(echo $1 | sed -e 's/\/[^\/]*.html*\/*//g') \
     || die "unable to generate root link address"
@@ -187,9 +208,9 @@ echo -e "document base address: ${YELLOW}${link_rel}${RESET}"
 echo -e "file name (without extension): ${YELLOW}${fname}${RESET}"
 echo -e "file extension: ${YELLOW}${fext}${RESET}"
 
-rm ${fname}.{$fext} >/dev/null 2>&1
+rm ${fname}.{$fext} >${log_source} 2>&1
 get "$1" || die "unable to fetch index file"
-${tidy} -config tidy.config -m ${fname}.${fext} >/dev/null 2>&1 \
+${tidy} -config tidy.config -m ${fname}.${fext} >${log_source} 2>&1 \
     || warn "${CYAN}applying tidy changes to index file${RESET}"
 
 out_name=$(${xml} sel --html -N x="http://www.w3.org/1999/xhtml" \
@@ -199,14 +220,14 @@ out_name=$(${xml} sel --html -N x="http://www.w3.org/1999/xhtml" \
     || die "unable to generate output file name"
 echo -e "output file name: ${YELLOW}${out_name}${RESET}"
 ${xml} sel --html -N x="http://www.w3.org/1999/xhtml" -t -m "//x:big" -c . \
-    -n1 ${fname}.${fext} >/dev/null 2>&1
+    -n1 ${fname}.${fext} >${log_source} 2>&1
 
 if [ $? -ne 0 ]; then
     single_page_render
 else
     ${xml} sel --html -N x="http://www.w3.org/1999/xhtml" \
         -t -m "//x:big/x:a/text()" -c . \
-        -n1 ${fname}.${fext} 2>/dev/null | ${xml} esc > .tmp \
+        -n1 ${fname}.${fext} 2>${log_source} | ${xml} esc > .tmp \
         || die "unable to get titles from index file"
     while read line; do
         c_titles+=( "$line" )
@@ -214,7 +235,7 @@ else
 
     ${xml} sel --html -N x="http://www.w3.org/1999/xhtml" \
         -t -m "//x:big/x:a" -v "@href" \
-        -n1 ${fname}.${fext} 2>/dev/null > .tmp \
+        -n1 ${fname}.${fext} 2>${log_source} > .tmp \
         || die "unable to get chapter files from index index file"
     while read line; do
         c_files+=( "$line" )
